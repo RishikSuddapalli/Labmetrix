@@ -61,9 +61,6 @@ mlruns/
 *.npy
 *.npz
 
-# Temporary files
-.tmp/
-tmp/
 
 # Project specific
 models/
