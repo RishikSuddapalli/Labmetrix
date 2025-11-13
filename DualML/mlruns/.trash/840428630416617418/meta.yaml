@@ -1,0 +1,8 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/840428630416617418
+creation_time: 1763019393832
+experiment_id: '840428630416617418'
+last_update_time: 1763029055309
+lifecycle_stage: deleted
+name: Max_EMI_Regression
+tags:
+  mlflow.experimentKind: custom_model_development

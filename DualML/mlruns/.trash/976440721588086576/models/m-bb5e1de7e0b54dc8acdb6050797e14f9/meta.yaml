@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/976440721588086576/models/m-bb5e1de7e0b54dc8acdb6050797e14f9/artifacts
+creation_timestamp: 1763028751667
+experiment_id: '976440721588086576'
+last_updated_timestamp: 1763028758465
+model_id: m-bb5e1de7e0b54dc8acdb6050797e14f9
+model_type: null
+name: Random_Forest_Classification
+source_run_id: bbb525d708ea497188417057caccb394
+status: 2
+status_message: null

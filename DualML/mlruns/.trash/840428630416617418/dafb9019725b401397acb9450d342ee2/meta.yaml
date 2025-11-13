@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/840428630416617418/dafb9019725b401397acb9450d342ee2/artifacts
+deleted_time: 1763027744705
+end_time: 1763024764095
+entry_point_name: ''
+experiment_id: '840428630416617418'
+lifecycle_stage: deleted
+run_id: dafb9019725b401397acb9450d342ee2
+run_name: Random Forest
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763024423963
+status: 3
+tags: []
+user_id: KIIT

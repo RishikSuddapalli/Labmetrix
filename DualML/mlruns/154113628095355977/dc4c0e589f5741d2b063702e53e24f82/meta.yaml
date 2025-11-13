@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/154113628095355977/dc4c0e589f5741d2b063702e53e24f82/artifacts
+end_time: 1763029496942
+entry_point_name: ''
+experiment_id: '154113628095355977'
+lifecycle_stage: active
+run_id: dc4c0e589f5741d2b063702e53e24f82
+run_name: Logistic Regression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763029485171
+status: 3
+tags: []
+user_id: KIIT

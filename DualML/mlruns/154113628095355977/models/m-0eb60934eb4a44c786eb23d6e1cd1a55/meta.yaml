@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/154113628095355977/models/m-0eb60934eb4a44c786eb23d6e1cd1a55/artifacts
+creation_timestamp: 1763029587362
+experiment_id: '154113628095355977'
+last_updated_timestamp: 1763029594925
+model_id: m-0eb60934eb4a44c786eb23d6e1cd1a55
+model_type: null
+name: XGBoost_Classification
+source_run_id: b6a5496417da4fc1814d4f25337578b6
+status: 2
+status_message: null

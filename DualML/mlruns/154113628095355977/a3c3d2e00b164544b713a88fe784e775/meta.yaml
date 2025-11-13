@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/154113628095355977/a3c3d2e00b164544b713a88fe784e775/artifacts
+end_time: 1763029940363
+entry_point_name: ''
+experiment_id: '154113628095355977'
+lifecycle_stage: active
+run_id: a3c3d2e00b164544b713a88fe784e775
+run_name: XGBoost
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763029929906
+status: 3
+tags: []
+user_id: KIIT

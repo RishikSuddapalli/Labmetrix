@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/840428630416617418/2ff1c9e5110b4346a91c370350cf4cfb/artifacts
+deleted_time: 1763027744721
+end_time: 1763026518597
+entry_point_name: ''
+experiment_id: '840428630416617418'
+lifecycle_stage: deleted
+run_id: 2ff1c9e5110b4346a91c370350cf4cfb
+run_name: Linear Regression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763026506153
+status: 3
+tags: []
+user_id: KIIT

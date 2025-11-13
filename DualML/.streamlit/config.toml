@@ -1,0 +1,15 @@
+# .streamlit/config.toml
+[server]
+port = 8501
+address = "localhost"
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+
+[scheduler]
+maxUploadSize = 200

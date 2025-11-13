@@ -1,0 +1,22 @@
+artifact_path: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/976440721588086576/models/m-1057bc74579e4e029bed74d163217920/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.11.14
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.7.2
+mlflow_version: 3.6.0
+model_id: m-1057bc74579e4e029bed74d163217920
+model_size_bytes: 5219
+model_uuid: m-1057bc74579e4e029bed74d163217920
+prompts: null
+run_id: 4eb08a0c913946ea911a4b54cea07671
+utc_time_created: '2025-11-13 08:57:43.577743'

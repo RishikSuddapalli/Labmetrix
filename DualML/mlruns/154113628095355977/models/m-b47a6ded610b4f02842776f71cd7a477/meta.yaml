@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/154113628095355977/models/m-b47a6ded610b4f02842776f71cd7a477/artifacts
+creation_timestamp: 1763029933722
+experiment_id: '154113628095355977'
+last_updated_timestamp: 1763029940334
+model_id: m-b47a6ded610b4f02842776f71cd7a477
+model_type: null
+name: XGBoost_Regression
+source_run_id: a3c3d2e00b164544b713a88fe784e775
+status: 2
+status_message: null

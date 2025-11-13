@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/976440721588086576/models/m-17a8cde668d34d7cb124c7c1f0406e38/artifacts
+creation_timestamp: 1763018822073
+experiment_id: '976440721588086576'
+last_updated_timestamp: 1763018829213
+model_id: m-17a8cde668d34d7cb124c7c1f0406e38
+model_type: null
+name: model
+source_run_id: 42275bafd1fb4764aefeb7868d6dcaf3
+status: 2
+status_message: null

@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/840428630416617418/models/m-77392e6a209047c58b715e5513daad6b/artifacts
+creation_timestamp: 1763026509480
+experiment_id: '840428630416617418'
+last_updated_timestamp: 1763026518561
+model_id: m-77392e6a209047c58b715e5513daad6b
+model_type: null
+name: Linear_Regression_Regression
+source_run_id: 2ff1c9e5110b4346a91c370350cf4cfb
+status: 2
+status_message: null

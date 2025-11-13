@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/154113628095355977/models/m-1c30b9eef8f749829c7630c4310cd16b/artifacts
+creation_timestamp: 1763029923273
+experiment_id: '154113628095355977'
+last_updated_timestamp: 1763029929871
+model_id: m-1c30b9eef8f749829c7630c4310cd16b
+model_type: null
+name: Random_Forest_Regression
+source_run_id: db9487925e854cb09d8f806e79eb0faa
+status: 2
+status_message: null

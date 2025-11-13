@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/976440721588086576/models/m-4c43090ede0740b1bb2b520dfbbf73bb/artifacts
+creation_timestamp: 1763028677230
+experiment_id: '976440721588086576'
+last_updated_timestamp: 1763028685480
+model_id: m-4c43090ede0740b1bb2b520dfbbf73bb
+model_type: null
+name: Logistic_Regression_Classification
+source_run_id: f83aec3194d24860986041511fc45b25
+status: 2
+status_message: null

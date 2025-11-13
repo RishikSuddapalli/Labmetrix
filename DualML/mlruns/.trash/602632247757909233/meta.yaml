@@ -1,0 +1,8 @@
+artifact_location: file:///C:/Users/KIIT/Desktop/Labmetrix/DualML/mlruns/602632247757909233
+creation_time: 1762963246385
+experiment_id: '602632247757909233'
+last_update_time: 1763029055311
+lifecycle_stage: deleted
+name: EMIPredict_AI
+tags:
+  mlflow.experimentKind: custom_model_development
