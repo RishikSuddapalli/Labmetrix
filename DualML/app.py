@@ -190,171 +190,99 @@ class EMIPredictAI:
 
     def calculate_financial_ratios(self, df):
         """Calculate key financial ratios"""
-        df['debt_to_income'] = (df['current_emi_amount'] / df['monthly_salary']).fillna(0)
-        df['expense_to_income'] = (
-            (df['monthly_rent'] + df['school_fees'] + df['college_fees'] + 
-             df['travel_expenses'] + df['groceries_utilities'] + 
-             df['other_monthly_expenses'] + df['current_emi_amount']) / 
-            df['monthly_salary']
-        ).fillna(0)
-        df['affordability_ratio'] = (
-            (df['monthly_salary'] - 
-             (df['monthly_rent'] + df['school_fees'] + df['college_fees'] + 
-              df['travel_expenses'] + df['groceries_utilities'] + 
-              df['other_monthly_expenses'])) / 
-            df['monthly_salary']
-        ).fillna(0)
-        
-        # Risk scoring
-        df['employment_stability'] = df['years_of_employment'] / 30  # Normalized
-        df['financial_stability'] = (df['bank_balance'] + df['emergency_fund']) / df['monthly_salary']
-        df['risk_score'] = (
-            0.3 * (1 - df['employment_stability']) +
-            0.3 * df['debt_to_income'] +
-            0.2 * df['expense_to_income'] +
-            0.2 * (1 - (df['credit_score'] - 300) / 550)
-        )
-        
-        return df
-    
-    def load_and_clean_data(self, file_path=None):
-        """
-        Load and clean the dataset with proper data cleaning and validation
-        
-        Args:
-            file_path (str, optional): Path to the data file. If None, uses emi_prediction_dataset.csv.
-            
-        Returns:
-            pd.DataFrame: Cleaned and validated dataset
-        """
         try:
-            from streamlit_config import config
-            import os
-            from pathlib import Path
-
-            # Use default path if not provided
-            if file_path is None:
-                file_path = os.path.join('data', 'emi_prediction_dataset.csv')
-
-            # Build a robust list of candidate paths
-            filename = os.path.basename(file_path)
-            base_dir = Path(__file__).resolve().parent
-            candidates = [
-                Path(file_path),
-                base_dir / file_path,
-                base_dir / 'data' / filename,
-                Path.cwd() / 'data' / filename,
-                Path.cwd() / filename,
-            ]
-
-            # Choose first existing path
-            chosen = None
-            for p in candidates:
-                if p.exists():
-                    chosen = p
-                    break
-
-            if chosen is None:
-                # As a last resort, try a case-insensitive match within data directories that exist
-                search_dirs = [
-                    base_dir / 'data',
-                    Path('data'),
-                    base_dir,
-                    Path.cwd(),
-                ]
-                for d in search_dirs:
-                    if d.exists() and d.is_dir():
-                        for f in d.iterdir():
-                            if f.is_file() and f.name.lower() == filename.lower():
-                                chosen = f
-                                break
-                    if chosen is not None:
-                        break
-
-            if chosen is None:
-                raise FileNotFoundError(
-                    f"Could not find the dataset file '{filename}'. "
-                    "Ensure it is committed to the repository under the 'data' folder."
-                )
-
-            # Update session state
-            st.session_state.data_path = str(chosen)
-            self.logger.info(f"Loading dataset from {chosen}")
-
-            # Read CSV with safe defaults
-            df = pd.read_csv(chosen, low_memory=False)
-
-            # Sanitize columns and dtypes
-            try:
-                # Ensure all column names are strings and non-empty
-                new_cols = []
-                for i, c in enumerate(df.columns):
-                    name = str(c).strip() if c is not None and str(c).strip() != '' else f"col_{i}"
-                    new_cols.append(name)
-                df.columns = new_cols
-
-                # Coerce expected numeric columns
-                numeric_cols = [
-                    'monthly_salary','years_of_employment','monthly_rent','family_size','dependents',
-                    'school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses',
-                    'current_emi_amount','credit_score','bank_balance','emergency_fund',
-                    'requested_amount','requested_tenure','max_monthly_emi'
-                ]
-                for col in numeric_cols:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-                # Fill obviously numeric NaNs where appropriate to avoid downstream math errors
-                fill_zeros = [c for c in numeric_cols if c in df.columns and c != 'credit_score']
-                for c in fill_zeros:
-                    df[c] = df[c].fillna(0)
-
-                if 'credit_score' in df.columns:
-                    df['credit_score'] = df['credit_score'].fillna(0)
-
-            except Exception as e:
-                self.logger.warning(f"Error during data sanitization: {str(e)}")
-
-            # Compute ratios/targets if missing
-            try:
-                if 'max_monthly_emi' not in df.columns or df['max_monthly_emi'].isna().all():
-                    if all(c in df.columns for c in [
-                        'monthly_salary','monthly_rent','school_fees','college_fees',
-                        'travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount'
-                    ]):
-                        total_exp = (
-                            df['monthly_rent'] + df['school_fees'] + df['college_fees'] +
-                            df['travel_expenses'] + df['groceries_utilities'] + df['other_monthly_expenses'] +
-                            df['current_emi_amount']
-                        )
-                        disposable = (df['monthly_salary'] - total_exp).clip(lower=0)
-                        df['max_monthly_emi'] = (disposable * 0.4).clip(lower=500)
-
-                if 'emi_eligibility' not in df.columns and all(c in df.columns for c in ['monthly_salary','credit_score']):
-                    # Simple heuristic based on disposable income and credit score
-                    total_exp = 0
-                    for c in ['monthly_rent','school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount']:
-                        if c in df.columns:
-                            total_exp = total_exp + df[c]
-                    disposable = (df['monthly_salary'] - total_exp).fillna(0)
-                    cond1 = (disposable > 0.4 * df['monthly_salary']) & (df['credit_score'] > 700)
-                    cond2 = (disposable > 0.2 * df['monthly_salary']) & (df['credit_score'] > 600)
-                    df['emi_eligibility'] = np.select([cond1, cond2], ['Eligible','High_Risk'], default='Not_Eligible')
-            except Exception as e:
-                self.logger.warning(f"Error computing derived targets: {str(e)}")
-
-            self.logger.info(f"Successfully loaded {len(df):,} records from {chosen}")
-
-            # Store the data in session state
-            st.session_state.current_data = df
-            st.session_state.data_loaded = True
-            st.session_state.data_path = str(chosen)
-
+            # Make a copy to avoid SettingWithCopyWarning
+            df = df.copy()
+            
+            # Calculate debt-to-income ratio
+            if 'Monthly_Income' in df.columns and 'Monthly_Expenses' in df.columns:
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    df['Debt_to_Income_Ratio'] = np.divide(
+                        df['Monthly_Expenses'], 
+                        df['Monthly_Income'],
+                        out=np.full_like(df['Monthly_Income'], np.nan, dtype='float32'),
+                        where=df['Monthly_Income'] > 0
+                    )
+            
+            # Calculate loan-to-value ratio if applicable
+            if 'Loan_Amount' in df.columns and 'Property_Value' in df.columns:
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    df['Loan_to_Value_Ratio'] = np.divide(
+                        df['Loan_Amount'],
+                        df['Property_Value'],
+                        out=np.full_like(df['Property_Value'], np.nan, dtype='float32'),
+                        where=df['Property_Value'] > 0
+                    )
+            
+            # Calculate credit utilization ratio
+            if 'Credit_Card_Limit' in df.columns and 'Credit_Card_Utilization' in df.columns:
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    df['Credit_Utilization_Ratio'] = np.divide(
+                        df['Credit_Card_Utilization'],
+                        df['Credit_Card_Limit'],
+                        out=np.full_like(df['Credit_Card_Limit'], np.nan, dtype='float32'),
+                        where=df['Credit_Card_Limit'] > 0
+                    )
+            
+            # Calculate age if Date_of_Birth exists
+            if 'Date_of_Birth' in df.columns:
+                today = pd.Timestamp.now()
+                df['Age'] = (today - df['Date_of_Birth']).dt.days / 365.25
+                df['Age'] = df['Age'].astype('float32')
+                
+            # Replace any infinite values that might have been created
+            df = df.replace([np.inf, -np.inf], np.nan)
+            df = df.fillna(df.median(numeric_only=True))
+                
             return df
-
+            
         except Exception as e:
-            self.logger.error(f"Unexpected error in load_and_clean_data: {str(e)}")
-            raise
+            self.logger.error(f"Error calculating financial ratios: {str(e)}", exc_info=True)
+            return df
+        
+    def load_and_clean_data(self, file_path=None):
+        """Load and clean the dataset with proper data cleaning and validation"""
+        try:
+            if file_path is None:
+                file_path = os.path.join("data", "emi_prediction_dataset.csv")
+            
+            self.logger.info(f"Loading dataset from {file_path}")
+            
+            # Read the CSV file with explicit dtypes
+            dtype_dict = {
+                'Customer_ID': 'string',
+                'Employment_Type': 'category',
+                'Residential_Status': 'category',
+                'Loan_Purpose': 'category',
+                'EMI_Payment_Status': 'int8'
+            }
+            
+            # Read the data with specified dtypes
+            df = pd.read_csv(file_path, dtype=dtype_dict, parse_dates=['Date_of_Birth', 'Employment_Start_Date', 'Last_Credit_Check_Date'])
+            
+            self.logger.info(f"Successfully loaded {len(df)} records from {file_path}")
+            
+            # Handle missing values
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
+            
+            # Replace any remaining infinite values
+            df = df.replace([np.inf, -np.inf], np.nan)
+            df = df.fillna(df.median(numeric_only=True))
+            
+            # Calculate financial ratios
+            df = self.calculate_financial_ratios(df)
+            
+            # Ensure all numeric columns are float32 to reduce memory usage and avoid Arrow issues
+            for col in df.select_dtypes(include=['int64', 'float64']).columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
+                
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error loading data: {str(e)}", exc_info=True)
+            st.error(f"Error loading data: {str(e)}")
+            return None
 # Create required directories on startup
 def initialize_application():
     """Initialize application directories and configuration"""

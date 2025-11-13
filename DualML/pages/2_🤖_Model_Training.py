@@ -30,6 +30,16 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from io import BytesIO
 
+def fix_dataframe_display(df):
+    """Fix DataFrame display by converting problematic dtypes"""
+    if df is None or df.empty:
+        return df
+        
+    df = df.copy()
+    # Convert problematic numeric columns to standard float64
+    for col in df.select_dtypes(include=['Float64', 'Int64', 'float64']).columns:
+        df[col] = df[col].astype('float64')
+    return df
 # Set page config
 st.set_page_config(
     page_title="Model Training & Management",
