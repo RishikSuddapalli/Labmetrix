@@ -49,6 +49,9 @@ mlruns/
 .local/
 
 # Data files
+# Allow specific dataset file
+!data/emi_prediction_dataset.csv
+# But ignore all other CSV files
 *.csv
 *.h5
 *.pkl
@@ -64,7 +67,8 @@ tmp/
 
 # Project specific
 models/
-data/
+# Don't ignore the data directory, just specific files within it
+# data/
 
 # Streamlit
 .streamlit/
