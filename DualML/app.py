@@ -128,11 +128,64 @@ class EMIPredictAI:
             self.logger.error(error_msg)
             raise FileNotFoundError(error_msg)
         
+        # Sanitize columns and coerce numeric types
+        try:
+            # Ensure all column names are strings and non-empty
+            new_cols = []
+            for i, c in enumerate(df.columns):
+                name = str(c).strip() if c is not None and str(c).strip() != '' else f"col_{i}"
+                new_cols.append(name)
+            df.columns = new_cols
+
+            # Coerce expected numeric columns
+            numeric_cols = [
+                'monthly_salary','years_of_employment','monthly_rent','family_size','dependents',
+                'school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses',
+                'current_emi_amount','credit_score','bank_balance','emergency_fund',
+                'requested_amount','requested_tenure','max_monthly_emi'
+            ]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            # Fill numeric NaNs where appropriate
+            fill_zeros = [c for c in numeric_cols if c in df.columns and c != 'credit_score']
+            for c in fill_zeros:
+                df[c] = df[c].fillna(0)
+            if 'credit_score' in df.columns:
+                df['credit_score'] = df['credit_score'].fillna(0)
+
+            # Compute ratios/targets if missing
+            if 'max_monthly_emi' not in df.columns or df['max_monthly_emi'].isna().all():
+                if all(c in df.columns for c in [
+                    'monthly_salary','monthly_rent','school_fees','college_fees',
+                    'travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount'
+                ]):
+                    total_exp = (
+                        df['monthly_rent'] + df['school_fees'] + df['college_fees'] +
+                        df['travel_expenses'] + df['groceries_utilities'] + df['other_monthly_expenses'] +
+                        df['current_emi_amount']
+                    )
+                    disposable = (df['monthly_salary'] - total_exp).clip(lower=0)
+                    df['max_monthly_emi'] = (disposable * 0.4).clip(lower=500)
+
+            if 'emi_eligibility' not in df.columns and all(c in df.columns for c in ['monthly_salary','credit_score']):
+                total_exp = 0
+                for c in ['monthly_rent','school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount']:
+                    if c in df.columns:
+                        total_exp = total_exp + df[c]
+                disposable = (df['monthly_salary'] - total_exp).fillna(0)
+                cond1 = (disposable > 0.4 * df['monthly_salary']) & (df['credit_score'] > 700)
+                cond2 = (disposable > 0.2 * df['monthly_salary']) & (df['credit_score'] > 600)
+                df['emi_eligibility'] = np.select([cond1, cond2], ['Eligible','High_Risk'], default='Not_Eligible')
+        except Exception as e:
+            self.logger.warning(f"Error sanitizing sample data: {str(e)}")
+
         # Store the data in session state
         st.session_state.current_data = df
         st.session_state.data_loaded = True
         st.session_state.data_path = found_path
-        
+
         return df
 
     def calculate_financial_ratios(self, df):
@@ -177,79 +230,128 @@ class EMIPredictAI:
         try:
             from streamlit_config import config
             import os
-            
+            from pathlib import Path
+
             # Use default path if not provided
             if file_path is None:
                 file_path = os.path.join('data', 'emi_prediction_dataset.csv')
-            
-            # Update session state
-            st.session_state.data_path = file_path
-            self.logger.info(f"Starting to load data from {file_path}")
-            
-            # Get the preprocessor from session state
-            preprocessor = st.session_state.data_preprocessor
-            
-            try:
-                # Try to load the actual data
-                self.logger.info(f"Attempting to load data from: {file_path}")
-                
-                # First try to load the file directly
-                if os.path.exists(file_path):
-                    df = pd.read_csv(file_path)
-                else:
-                    # If not found, try case-insensitive search in the data directory
-                    data_dir = os.path.dirname(file_path) or 'data'
-                    filename = os.path.basename(file_path)
-                    
-                    files = [f for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir, f))]
-                    matched_files = [f for f in files if filename.lower() in f.lower()]
-                    
-                    if not matched_files:
-                        raise FileNotFoundError(f"No matching file found for {filename} in {data_dir}")
-                        
-                    actual_file = os.path.join(data_dir, matched_files[0])
-                    self.logger.info(f"Found matching file: {actual_file}")
-                    df = pd.read_csv(actual_file)
-                    
-                    # Update the file path to the actual file found
-                    file_path = actual_file
-                
-                # Sanitize columns and dtypes
-                try:
-                    # Ensure all column names are strings and non-empty
-                    new_cols = []
-                    for i, c in enumerate(df.columns):
-                        name = str(c).strip() if c is not None and str(c).strip() != '' else f"col_{i}"
-                        new_cols.append(name)
-                    df.columns = new_cols
-                    
-                    # Convert pandas nullable Int64 to float64 to avoid ArrowInvalid
-                    for col in df.columns:
-                        if str(df[col].dtype) == 'Int64':
-                            df[col] = df[col].astype('float64')
-                except Exception as e:
-                    self.logger.warning(f"Error during data sanitization: {str(e)}")
-                
-                self.logger.info(f"Successfully loaded {len(df):,} records from {file_path}")
-                
-                # Store the data in session state
-                st.session_state.current_data = df
-                st.session_state.data_loaded = True
-                st.session_state.data_path = file_path
-                
-                return df
-                
-            except FileNotFoundError as e:
-                self.logger.error(f"Dataset file not found: {file_path}")
+
+            # Build a robust list of candidate paths
+            filename = os.path.basename(file_path)
+            base_dir = Path(__file__).resolve().parent
+            candidates = [
+                Path(file_path),
+                base_dir / file_path,
+                base_dir / 'data' / filename,
+                Path.cwd() / 'data' / filename,
+                Path.cwd() / filename,
+            ]
+
+            # Choose first existing path
+            chosen = None
+            for p in candidates:
+                if p.exists():
+                    chosen = p
+                    break
+
+            if chosen is None:
+                # As a last resort, try a case-insensitive match within data directories that exist
+                search_dirs = [
+                    base_dir / 'data',
+                    Path('data'),
+                    base_dir,
+                    Path.cwd(),
+                ]
+                for d in search_dirs:
+                    if d.exists() and d.is_dir():
+                        for f in d.iterdir():
+                            if f.is_file() and f.name.lower() == filename.lower():
+                                chosen = f
+                                break
+                    if chosen is not None:
+                        break
+
+            if chosen is None:
                 raise FileNotFoundError(
-                    f"Could not find the dataset file at {file_path}. "
-                    "Please ensure 'emi_prediction_dataset.csv' is in the 'data' directory."
+                    f"Could not find the dataset file '{filename}'. "
+                    "Ensure it is committed to the repository under the 'data' folder."
                 )
-            
+
+            # Update session state
+            st.session_state.data_path = str(chosen)
+            self.logger.info(f"Loading dataset from {chosen}")
+
+            # Read CSV with safe defaults
+            df = pd.read_csv(chosen, low_memory=False)
+
+            # Sanitize columns and dtypes
+            try:
+                # Ensure all column names are strings and non-empty
+                new_cols = []
+                for i, c in enumerate(df.columns):
+                    name = str(c).strip() if c is not None and str(c).strip() != '' else f"col_{i}"
+                    new_cols.append(name)
+                df.columns = new_cols
+
+                # Coerce expected numeric columns
+                numeric_cols = [
+                    'monthly_salary','years_of_employment','monthly_rent','family_size','dependents',
+                    'school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses',
+                    'current_emi_amount','credit_score','bank_balance','emergency_fund',
+                    'requested_amount','requested_tenure','max_monthly_emi'
+                ]
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                # Fill obviously numeric NaNs where appropriate to avoid downstream math errors
+                fill_zeros = [c for c in numeric_cols if c in df.columns and c != 'credit_score']
+                for c in fill_zeros:
+                    df[c] = df[c].fillna(0)
+
+                if 'credit_score' in df.columns:
+                    df['credit_score'] = df['credit_score'].fillna(0)
+
             except Exception as e:
-                self.logger.error(f"Error loading data: {str(e)}")
-                raise
-                
+                self.logger.warning(f"Error during data sanitization: {str(e)}")
+
+            # Compute ratios/targets if missing
+            try:
+                if 'max_monthly_emi' not in df.columns or df['max_monthly_emi'].isna().all():
+                    if all(c in df.columns for c in [
+                        'monthly_salary','monthly_rent','school_fees','college_fees',
+                        'travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount'
+                    ]):
+                        total_exp = (
+                            df['monthly_rent'] + df['school_fees'] + df['college_fees'] +
+                            df['travel_expenses'] + df['groceries_utilities'] + df['other_monthly_expenses'] +
+                            df['current_emi_amount']
+                        )
+                        disposable = (df['monthly_salary'] - total_exp).clip(lower=0)
+                        df['max_monthly_emi'] = (disposable * 0.4).clip(lower=500)
+
+                if 'emi_eligibility' not in df.columns and all(c in df.columns for c in ['monthly_salary','credit_score']):
+                    # Simple heuristic based on disposable income and credit score
+                    total_exp = 0
+                    for c in ['monthly_rent','school_fees','college_fees','travel_expenses','groceries_utilities','other_monthly_expenses','current_emi_amount']:
+                        if c in df.columns:
+                            total_exp = total_exp + df[c]
+                    disposable = (df['monthly_salary'] - total_exp).fillna(0)
+                    cond1 = (disposable > 0.4 * df['monthly_salary']) & (df['credit_score'] > 700)
+                    cond2 = (disposable > 0.2 * df['monthly_salary']) & (df['credit_score'] > 600)
+                    df['emi_eligibility'] = np.select([cond1, cond2], ['Eligible','High_Risk'], default='Not_Eligible')
+            except Exception as e:
+                self.logger.warning(f"Error computing derived targets: {str(e)}")
+
+            self.logger.info(f"Successfully loaded {len(df):,} records from {chosen}")
+
+            # Store the data in session state
+            st.session_state.current_data = df
+            st.session_state.data_loaded = True
+            st.session_state.data_path = str(chosen)
+
+            return df
+
         except Exception as e:
             self.logger.error(f"Unexpected error in load_and_clean_data: {str(e)}")
             raise

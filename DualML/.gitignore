@@ -71,5 +71,4 @@ models/
 .streamlit/
 
 # MLflow
-data/
 mlruns/
