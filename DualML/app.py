@@ -359,6 +359,7 @@ class EMIPredictAI:
 def initialize_application():
     """Initialize application directories and configuration"""
     import os
+    from pathlib import Path
     
     # Create required directories if they don't exist
     required_dirs = ['data', 'models', 'mlruns', 'logs', 'tmp']
@@ -373,11 +374,30 @@ def initialize_application():
         except Exception as e:
             print(f"Warning: Could not create or write to directory '{dir_name}': {str(e)}")
     
-    # Set MLflow tracking URI
+    # Set MLflow tracking URI (robust to relative paths)
     try:
         import mlflow
-        mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
-        print(f"Application initialized with MLflow tracking URI: {config.MLFLOW_TRACKING_URI}")
+        base_dir = Path(__file__).resolve().parent
+        env_uri = os.getenv("MLFLOW_TRACKING_URI", config.MLFLOW_TRACKING_URI)
+
+        def is_uri(s: str) -> bool:
+            return "://" in s or s.startswith("sqlite://")
+
+        tracking_uri = env_uri
+        if not is_uri(tracking_uri):
+            # Treat as filesystem path; make absolute inside app directory
+            path = Path(tracking_uri)
+            if not path.is_absolute():
+                path = base_dir / path
+            # Ensure directory exists
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                print(f"Warning: Could not create MLflow directory '{path}': {e}")
+            tracking_uri = str(path)
+
+        mlflow.set_tracking_uri(tracking_uri)
+        print(f"Application initialized with MLflow tracking URI: {tracking_uri}")
     except Exception as e:
         print(f"Warning: Could not initialize MLflow: {str(e)}")
     

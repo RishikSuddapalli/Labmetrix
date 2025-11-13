@@ -44,6 +44,7 @@ logs/
 
 # MLflow
 mlruns/
+mlflow.db
 
 # Local development
 .local/
