@@ -431,7 +431,7 @@ def show_deployment():
         st.warning("REST API deployment is not yet implemented.")
 
 def main():
-    # Sidebar navigation
+    # Main page title and description
     st.title("🤖 Machine Learning Model Training")
     st.markdown("Train and evaluate classification and regression models for financial risk assessment")
     
@@ -448,13 +448,7 @@ def main():
     # Get data from session state
     data = st.session_state.current_data
     
-    # Show model training tabs
-    page = st.sidebar.radio(
-        "Model Operations",
-        ["Train Model", "Model Registry", "Deploy Model"]
-    )
-    
-    # Validate the data for training before showing any model pages
+    # Validate the data for training
     is_valid, message = validate_training_data(data)
     if not is_valid:
         st.error(f"❌ {message}")
@@ -464,15 +458,7 @@ def main():
             st.switch_page("pages/1_📊_Data_Analysis.py")
         return
     
-    # Show the selected page only if data is valid
-    if page == "Train Model":
-        show_model_training(data)
-    elif page == "Model Registry":
-        show_model_registry()
-    elif page == "Deploy Model":
-        show_deployment()
-    
-    # Show data source info
+    # Show data source info in sidebar
     data_source = "Sample Data" if st.session_state.get('using_sample_data', False) \
                  else st.session_state.get('data_path', 'Unknown source')
     
@@ -496,7 +482,7 @@ def main():
     # Initialize MLflow
     mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
     
-    # Create tabs
+    # Create main tabs for different training sections
     tab1, tab2, tab3, tab4 = st.tabs([
         "🔧 Data Preparation", 
         "🎯 Classification", 
