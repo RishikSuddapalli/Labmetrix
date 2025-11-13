@@ -91,65 +91,28 @@ class EMIPredictAI:
         self.mlflow_uri = "mlruns"
         
     def load_sample_data(self):
-        """Generate sample financial data for demonstration"""
-        np.random.seed(42)
-        n_samples = 10000  # Smaller sample for demo
+        """Load the emi_prediction_dataset.csv file"""
+        import os
+        from pathlib import Path
         
-        data = {
-            'age': np.random.randint(25, 60, n_samples),
-            'gender': np.random.choice(['Male', 'Female'], n_samples),
-            'marital_status': np.random.choice(['Single', 'Married'], n_samples),
-            'education': np.random.choice(['High School', 'Graduate', 'Post Graduate', 'Professional'], n_samples),
-            'monthly_salary': np.random.normal(50000, 20000, n_samples).clip(15000, 200000),
-            'employment_type': np.random.choice(['Private', 'Government', 'Self-employed'], n_samples),
-            'years_of_employment': np.random.exponential(5, n_samples).clip(0, 30),
-            'house_type': np.random.choice(['Rented', 'Own', 'Family'], n_samples),
-            'monthly_rent': np.random.normal(15000, 5000, n_samples).clip(0, 50000),
-            'family_size': np.random.randint(1, 6, n_samples),
-            'dependents': np.random.randint(0, 4, n_samples),
-            'school_fees': np.random.normal(5000, 2000, n_samples).clip(0, 20000),
-            'college_fees': np.random.normal(10000, 5000, n_samples).clip(0, 50000),
-            'travel_expenses': np.random.normal(8000, 3000, n_samples).clip(1000, 30000),
-            'groceries_utilities': np.random.normal(12000, 4000, n_samples).clip(3000, 30000),
-            'other_monthly_expenses': np.random.normal(5000, 2000, n_samples).clip(1000, 20000),
-            'existing_loans': np.random.choice([0, 1], n_samples, p=[0.6, 0.4]),
-            'current_emi_amount': np.random.normal(8000, 4000, n_samples).clip(0, 30000),
-            'credit_score': np.random.normal(650, 100, n_samples).clip(300, 850),
-            'bank_balance': np.random.normal(100000, 50000, n_samples).clip(0, 500000),
-            'emergency_fund': np.random.normal(50000, 20000, n_samples).clip(0, 200000),
-            'emi_scenario': np.random.choice([
-                'E-commerce Shopping', 'Home Appliances', 'Vehicle', 
-                'Personal Loan', 'Education'
-            ], n_samples),
-            'requested_amount': np.random.normal(300000, 200000, n_samples).clip(10000, 1500000),
-            'requested_tenure': np.random.randint(3, 84, n_samples)
-        }
+        # Define the path to the dataset
+        dataset_path = os.path.join('data', 'emi_prediction_dataset.csv')
         
-        df = pd.DataFrame(data)
-        
-        # Calculate financial ratios for target variables
-        total_monthly_expenses = (
-            df['monthly_rent'] + df['school_fees'] + df['college_fees'] + 
-            df['travel_expenses'] + df['groceries_utilities'] + 
-            df['other_monthly_expenses'] + df['current_emi_amount']
-        )
-        
-        disposable_income = df['monthly_salary'] - total_monthly_expenses
-        
-        # Generate classification target (emi_eligibility)
-        conditions = [
-            (disposable_income > 0.4 * df['monthly_salary']) & (df['credit_score'] > 700),
-            (disposable_income > 0.2 * df['monthly_salary']) & (df['credit_score'] > 600),
-            (disposable_income <= 0.2 * df['monthly_salary']) | (df['credit_score'] <= 600)
-        ]
-        choices = ['Eligible', 'High_Risk', 'Not_Eligible']
-        df['emi_eligibility'] = np.select(conditions, choices, default='Not_Eligible')
-        
-        # Generate regression target (max_monthly_emi)
-        df['max_monthly_emi'] = disposable_income * 0.4  # 40% of disposable income
-        df['max_monthly_emi'] = df['max_monthly_emi'].clip(500, 50000)
-        
-        return df
+        try:
+            # Load the dataset
+            df = pd.read_csv(dataset_path)
+            self.logger.info(f"Successfully loaded dataset from {dataset_path}")
+            
+            # Store the data in session state
+            st.session_state.current_data = df
+            st.session_state.data_loaded = True
+            st.session_state.data_path = dataset_path
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error loading dataset from {dataset_path}: {str(e)}")
+            raise FileNotFoundError(f"Could not load dataset from {dataset_path}. Please ensure the file exists and is accessible.")
 
     def calculate_financial_ratios(self, df):
         """Calculate key financial ratios"""
@@ -185,17 +148,18 @@ class EMIPredictAI:
         Load and clean the dataset with proper data cleaning and validation
         
         Args:
-            file_path (str, optional): Path to the data file. If None, uses default from config.
+            file_path (str, optional): Path to the data file. If None, uses emi_prediction_dataset.csv.
             
         Returns:
             pd.DataFrame: Cleaned and validated dataset
         """
         try:
             from streamlit_config import config
+            import os
             
             # Use default path if not provided
             if file_path is None:
-                file_path = st.session_state.get('data_path', config.DATA_PATH)
+                file_path = os.path.join('data', 'emi_prediction_dataset.csv')
             
             # Update session state
             st.session_state.data_path = file_path
@@ -207,68 +171,59 @@ class EMIPredictAI:
             try:
                 # Try to load the actual data
                 self.logger.info(f"Attempting to load data from: {file_path}")
-                df = preprocessor.load_and_validate_data(file_path)
-                # Sanitize columns and dtypes to avoid Arrow conversion issues in Streamlit
+                
+                # First try to load the file directly
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path)
+                else:
+                    # If not found, try case-insensitive search in the data directory
+                    data_dir = os.path.dirname(file_path) or 'data'
+                    filename = os.path.basename(file_path)
+                    
+                    files = [f for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir, f))]
+                    matched_files = [f for f in files if filename.lower() in f.lower()]
+                    
+                    if not matched_files:
+                        raise FileNotFoundError(f"No matching file found for {filename} in {data_dir}")
+                        
+                    actual_file = os.path.join(data_dir, matched_files[0])
+                    self.logger.info(f"Found matching file: {actual_file}")
+                    df = pd.read_csv(actual_file)
+                    
+                    # Update the file path to the actual file found
+                    file_path = actual_file
+                
+                # Sanitize columns and dtypes
                 try:
-                    import pandas as pd
                     # Ensure all column names are strings and non-empty
                     new_cols = []
                     for i, c in enumerate(df.columns):
-                        name = str(c) if c is not None and str(c) != '' else f"col_{i}"
+                        name = str(c).strip() if c is not None and str(c).strip() != '' else f"col_{i}"
                         new_cols.append(name)
                     df.columns = new_cols
+                    
                     # Convert pandas nullable Int64 to float64 to avoid ArrowInvalid
                     for col in df.columns:
                         if str(df[col].dtype) == 'Int64':
                             df[col] = df[col].astype('float64')
-                except Exception as _:
-                    pass
+                except Exception as e:
+                    self.logger.warning(f"Error during data sanitization: {str(e)}")
+                
                 self.logger.info(f"Successfully loaded {len(df):,} records from {file_path}")
                 
                 # Store the data in session state
                 st.session_state.current_data = df
                 st.session_state.data_loaded = True
+                st.session_state.data_path = file_path
                 
                 return df
                 
             except FileNotFoundError as e:
-                self.logger.warning(f"File not found: {file_path}")
-                # Try with case-insensitive filename
-                import os
-                data_dir = os.path.dirname(file_path) if os.path.dirname(file_path) else '.'
-                filename = os.path.basename(file_path)
-                
-                # Look for case-insensitive match
-                try:
-                    import glob
-                    files = glob.glob(os.path.join(data_dir, '*'))
-                    matched_files = [f for f in files if os.path.isfile(f) and filename.lower() in os.path.basename(f).lower()]
-                    
-                    if matched_files:
-                        actual_file = matched_files[0]
-                        self.logger.info(f"Found matching file: {actual_file}")
-                        df = preprocessor.load_and_validate_data(actual_file)
-                        
-                        # Update session state
-                        st.session_state.current_data = df
-                        st.session_state.data_loaded = True
-                        st.session_state.data_path = actual_file
-                        
-                        return df
-                    
-                    raise FileNotFoundError(f"No matching file found for {filename} in {data_dir}")
-                    
-                except Exception as inner_e:
-                    self.logger.warning(f"Error in case-insensitive file search: {str(inner_e)}")
-                    self.logger.warning("Generating sample data instead")
-                    
-                    # Generate and return sample data
-                    sample_data = self.load_sample_data()
-                    st.session_state.current_data = sample_data
-                    st.session_state.data_loaded = True
-                    st.session_state.using_sample_data = True
-                    
-                    return sample_data
+                self.logger.error(f"Dataset file not found: {file_path}")
+                raise FileNotFoundError(
+                    f"Could not find the dataset file at {file_path}. "
+                    "Please ensure 'emi_prediction_dataset.csv' is in the 'data' directory."
+                )
             
             except Exception as e:
                 self.logger.error(f"Error loading data: {str(e)}")
