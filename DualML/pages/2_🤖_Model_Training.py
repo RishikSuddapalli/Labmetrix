@@ -432,27 +432,10 @@ def show_deployment():
 
 def main():
     # Sidebar navigation
-    st.sidebar.title("Model Management")
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Train Model", "Model Registry", "Deploy Model"],
-        index=0
-    )
-    
-    # Load data from session state
-    data = st.session_state.get('processed_data')
-    
-    # Show selected page
-    if page == "Train Model":
-        show_model_training(data)
-    elif page == "Model Registry":
-        show_model_registry()
-    elif page == "Deploy Model":
-        show_deployment()
-    
     st.title("🤖 Machine Learning Model Training")
     st.markdown("Train and evaluate classification and regression models for financial risk assessment")
-    # Consistent sidebar navigation
+    
+    # Consistent sidebar navigation - only once at the top
     render_sidebar_nav("🤖 Model Training")
     
     # Check if data is loaded in session state
@@ -465,7 +448,13 @@ def main():
     # Get data from session state
     data = st.session_state.current_data
     
-    # Validate the data for training
+    # Show model training tabs
+    page = st.sidebar.radio(
+        "Model Operations",
+        ["Train Model", "Model Registry", "Deploy Model"]
+    )
+    
+    # Validate the data for training before showing any model pages
     is_valid, message = validate_training_data(data)
     if not is_valid:
         st.error(f"❌ {message}")
@@ -474,6 +463,14 @@ def main():
         if st.button("View Data Analysis"):
             st.switch_page("pages/1_📊_Data_Analysis.py")
         return
+    
+    # Show the selected page only if data is valid
+    if page == "Train Model":
+        show_model_training(data)
+    elif page == "Model Registry":
+        show_model_registry()
+    elif page == "Deploy Model":
+        show_deployment()
     
     # Show data source info
     data_source = "Sample Data" if st.session_state.get('using_sample_data', False) \
@@ -985,73 +982,123 @@ def train_classification_models(X, y, models, hyperparams, test_size, cv_folds, 
     
     results = []
     
-    # MLflow experiment
+    # MLflow experiment setup
     if use_mlflow:
-        mlflow.set_experiment("EMI_DUAL_ML")
+        try:
+            mlflow.set_experiment("EMI_DUAL_ML")
+            # Ensure tracking URI is set
+            if not mlflow.tracking.get_tracking_uri():
+                mlflow.set_tracking_uri("mlruns")  # Local file-based tracking
+        except Exception as e:
+            st.warning(f"MLflow setup warning: {str(e)}. Continuing without MLflow tracking.")
+            use_mlflow = False
     
     for model_name in models:
         try:
+            # Create model and pipeline
+            model = create_classification_model(model_name, hyperparams)
+            pipeline = Pipeline([
+                ('preprocessor', preprocessor),
+                ('classifier', model)
+            ])
+            
+            # MLflow run context
             if use_mlflow:
-                with mlflow.start_run(run_name=model_name):
-                    # Train model
-                    model = create_classification_model(model_name, hyperparams)
+                try:
+                    with mlflow.start_run(run_name=model_name, nested=True) as run:
+                        # Train model
+                        pipeline.fit(X_train, y_train)
+                        
+                        # Get the run ID immediately after starting the run
+                        run_id = run.info.run_id
+                        
+                        # Predictions
+                        y_pred = pipeline.predict(X_test)
+                        y_pred_proba = pipeline.predict_proba(X_test)
+                        
+                        # Calculate metrics
+                        accuracy = accuracy_score(y_test, y_pred)
+                        precision = precision_score(y_test, y_pred, average='weighted')
+                        recall = recall_score(y_test, y_pred, average='weighted')
+                        f1 = f1_score(y_test, y_pred, average='weighted')
+                        auc = roc_auc_score(y_test, y_pred_proba, multi_class='ovr')
+                        
+                        # Additional metrics for classification
+                        from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+                        mae = mean_absolute_error(y_test, y_pred)
+                        mape = mean_absolute_percentage_error(y_test, y_pred)
+                        
+                        # Log to MLflow
+                        mlflow.log_params(model.get_params())
+                        mlflow.log_metrics({
+                            "accuracy": accuracy,
+                            "precision": precision,
+                            "recall": recall,
+                            "f1_score": f1,
+                            "roc_auc": auc,
+                            "mae": mae,
+                            "mape": mape,
+                            "r2_score": r2_score(y_test, y_pred)
+                        })
+                        
+                        # Log model with consistent naming
+                        model_name_clean = model_name.replace(" ", "_")
+                        mlflow.sklearn.log_model(
+                            pipeline, 
+                            f"{model_name_clean}_Classification",
+                            registered_model_name=f"{model_name_clean}_Classification"
+                        )
+                        
+                        # Store run info in results
+                        results.append({
+                            "Model": model_name,
+                            "Accuracy": f"{accuracy:.4f}",
+                            "Precision": f"{precision:.4f}",
+                            "Recall": f"{recall:.4f}",
+                            "F1-Score": f"{f1:.4f}",
+                            "ROC-AUC": f"{auc:.4f}",
+                            "MAE": f"{mae:.4f}",
+                            "MAPE": f"{mape:.2%}",
+                            "R²": f"{r2_score(y_test, y_pred):.4f}",
+                            "MLflow Run ID": run_id
+                        })
+                        
+                        # Store model in session state
+                        st.session_state[f'{model_name.lower().replace(" ", "_")}_cls'] = pipeline
+                        
+                except Exception as e:
+                    st.error(f"MLflow error in {model_name}: {str(e)}")
+                    # Fall back to non-MLflow training
+                    use_mlflow = False
                     
-                    # Create pipeline
-                    pipeline = Pipeline([
-                        ('preprocessor', preprocessor),
-                        ('classifier', model)
-                    ])
-                    
-                    # Train model
-                    pipeline.fit(X_train, y_train)
-                    
-                    # Predictions
-                    y_pred = pipeline.predict(X_test)
-                    y_pred_proba = pipeline.predict_proba(X_test)
-                    
-                    # Calculate metrics
-                    accuracy = accuracy_score(y_test, y_pred)
-                    precision = precision_score(y_test, y_pred, average='weighted')
-                    recall = recall_score(y_test, y_pred, average='weighted')
-                    f1 = f1_score(y_test, y_pred, average='weighted')
-                    auc = roc_auc_score(y_test, y_pred_proba, multi_class='ovr')
-                    
-                    # Additional metrics for classification
-                    from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
-                    mae = mean_absolute_error(y_test, y_pred)
-                    mape = mean_absolute_percentage_error(y_test, y_pred)
-                    
-                    # Log to MLflow
-                    mlflow.log_params(model.get_params())
-                    mlflow.log_metrics({
-                        "accuracy": accuracy,
-                        "precision": precision,
-                        "recall": recall,
-                        "f1_score": f1,
-                        "roc_auc": auc,
-                        "mae": mae,
-                        "mape": mape,
-                        "r2_score": r2_score(y_test, y_pred)
-                    })
-                    
-                    # Log model with consistent naming
-                    model_name_clean = model_name.replace(" ", "_")
-                    mlflow.sklearn.log_model(pipeline, f"{model_name_clean}_Classification")
-                    
-                    results.append({
-                        "Model": model_name,
-                        "Accuracy": f"{accuracy:.4f}",
-                        "Precision": f"{precision:.4f}",
-                        "Recall": f"{recall:.4f}",
-                        "F1-Score": f"{f1:.4f}",
-                        "ROC-AUC": f"{auc:.4f}",
-                        "MAE": f"{mae:.4f}",
-                        "MAPE": f"{mape:.2%}",
-                        "R²": f"{r2_score(y_test, y_pred):.4f}"
-                    })
-                    
-                    # Store model in session state
-                    st.session_state[f'{model_name.lower().replace(" ", "_")}_cls'] = pipeline
+            # Non-MLflow training or fallback
+            if not use_mlflow:
+                pipeline.fit(X_train, y_train)
+                y_pred = pipeline.predict(X_test)
+                y_pred_proba = pipeline.predict_proba(X_test)
+                
+                accuracy = accuracy_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred, average='weighted')
+                recall = recall_score(y_test, y_pred, average='weighted')
+                f1 = f1_score(y_test, y_pred, average='weighted')
+                auc = roc_auc_score(y_test, y_pred_proba, multi_class='ovr')
+                mae = mean_absolute_error(y_test, y_pred)
+                mape = mean_absolute_percentage_error(y_test, y_pred)
+                
+                results.append({
+                    "Model": model_name,
+                    "Accuracy": f"{accuracy:.4f}",
+                    "Precision": f"{precision:.4f}",
+                    "Recall": f"{recall:.4f}",
+                    "F1-Score": f"{f1:.4f}",
+                    "ROC-AUC": f"{auc:.4f}",
+                    "MAE": f"{mae:.4f}",
+                    "MAPE": f"{mape:.2%}",
+                    "R²": f"{r2_score(y_test, y_pred):.4f}",
+                    "MLflow Run ID": "Not tracked"
+                })
+                
+                st.session_state[f'{model_name.lower().replace(" ", "_")}_cls'] = pipeline
             else:
                 # Train without MLflow
                 model = create_classification_model(model_name, hyperparams)
