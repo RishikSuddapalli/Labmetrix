@@ -95,24 +95,45 @@ class EMIPredictAI:
         import os
         from pathlib import Path
         
-        # Define the path to the dataset
-        dataset_path = os.path.join('data', 'emi_prediction_dataset.csv')
+        # Define possible locations for the dataset
+        possible_paths = [
+            os.path.join('data', 'emi_prediction_dataset.csv'),  # Local development
+            os.path.join(os.getcwd(), 'data', 'emi_prediction_dataset.csv'),  # Absolute path
+            'emi_prediction_dataset.csv',  # Current directory
+            os.path.join(os.path.dirname(__file__), 'data', 'emi_prediction_dataset.csv')  # Module-relative path
+        ]
         
-        try:
-            # Load the dataset
-            df = pd.read_csv(dataset_path)
-            self.logger.info(f"Successfully loaded dataset from {dataset_path}")
-            
-            # Store the data in session state
-            st.session_state.current_data = df
-            st.session_state.data_loaded = True
-            st.session_state.data_path = dataset_path
-            
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"Error loading dataset from {dataset_path}: {str(e)}")
-            raise FileNotFoundError(f"Could not load dataset from {dataset_path}. Please ensure the file exists and is accessible.")
+        df = None
+        found_path = None
+        
+        # Try each possible path
+        for dataset_path in possible_paths:
+            try:
+                self.logger.info(f"Attempting to load dataset from: {dataset_path}")
+                if os.path.exists(dataset_path):
+                    df = pd.read_csv(dataset_path)
+                    found_path = dataset_path
+                    self.logger.info(f"Successfully loaded dataset from {dataset_path}")
+                    break
+            except Exception as e:
+                self.logger.warning(f"Failed to load from {dataset_path}: {str(e)}")
+                continue
+        
+        if df is None:
+            error_msg = (
+                "Could not find or load 'emi_prediction_dataset.csv' in any of these locations:\n"
+                f"{chr(10).join(possible_paths)}\n\n"
+                "Please ensure the file exists in one of these locations."
+            )
+            self.logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
+        # Store the data in session state
+        st.session_state.current_data = df
+        st.session_state.data_loaded = True
+        st.session_state.data_path = found_path
+        
+        return df
 
     def calculate_financial_ratios(self, df):
         """Calculate key financial ratios"""
@@ -235,15 +256,50 @@ class EMIPredictAI:
 # Create required directories on startup
 def initialize_application():
     """Initialize application directories and configuration"""
+    import os
+    
+    # Create required directories if they don't exist
     required_dirs = ['data', 'models', 'mlruns', 'logs', 'tmp']
     for dir_name in required_dirs:
-        os.makedirs(dir_name, exist_ok=True)
+        try:
+            os.makedirs(dir_name, exist_ok=True)
+            # Verify directory is writable
+            test_file = os.path.join(dir_name, '.test')
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+        except Exception as e:
+            print(f"Warning: Could not create or write to directory '{dir_name}': {str(e)}")
     
     # Set MLflow tracking URI
-    import mlflow
-    mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
+        print(f"Application initialized with MLflow tracking URI: {config.MLFLOW_TRACKING_URI}")
+    except Exception as e:
+        print(f"Warning: Could not initialize MLflow: {str(e)}")
     
-    print(f"Application initialized with MLflow tracking URI: {config.MLFLOW_TRACKING_URI}")
+    # Verify data directory is accessible
+    data_dir = 'data'
+    if not os.path.exists(data_dir) or not os.path.isdir(data_dir):
+        print(f"Warning: Data directory '{data_dir}' does not exist or is not a directory")
+    
+    # Check if dataset file exists
+    dataset_path = os.path.join(data_dir, 'emi_prediction_dataset.csv')
+    if not os.path.exists(dataset_path):
+        print(f"Warning: Dataset file not found at {dataset_path}")
+        # Try to find it in other locations
+        possible_locations = [
+            os.path.join(os.getcwd(), 'data', 'emi_prediction_dataset.csv'),
+            'emi_prediction_dataset.csv',
+            os.path.join(os.path.dirname(__file__), 'data', 'emi_prediction_dataset.csv')
+        ]
+        for loc in possible_locations:
+            if os.path.exists(loc):
+                print(f"Note: Dataset found at: {loc}")
+                break
+        else:
+            print("Error: Could not find 'emi_prediction_dataset.csv' in any expected location")
 
 # Call initialization at the start of main()
 def main():
