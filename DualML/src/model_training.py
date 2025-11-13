@@ -22,17 +22,23 @@ import warnings
 warnings.filterwarnings('ignore')
 from typing import Dict, List, Any, Tuple, Union
 import logging
+from datetime import datetime
+import numpy as np
 
 from src.utils import EMIPredictUtils
+from src.mlflow_utils import MLflowManager
 
 class ModelTrainer:
     """Machine Learning model trainer for EMIPredict AI"""
     
-    def __init__(self):
+    def __init__(self, experiment_name='EMI_DUAL_ML'):
         self.utils = EMIPredictUtils()
         self.logger = self.utils.logger
         self.classification_models = {}
         self.regression_models = {}
+        self.experiment_name = experiment_name
+        self.mlflow_manager = MLflowManager()
+        self.mlflow_manager.setup_experiment(self.experiment_name)
         
     def prepare_data(self, df: pd.DataFrame, target_column: str, 
                     test_size: float = 0.2, random_state: int = 42) -> Tuple:
@@ -108,162 +114,80 @@ class ModelTrainer:
         
         return feature_names
     
-    def train_classification_models(self, X_train, X_test, y_train, y_test, 
-                                  preprocessor, model_types: List[str] = None,
-                                  use_mlflow: bool = True) -> Dict[str, Any]:
+    def train_classification_model(self, X_train, y_train, X_test, y_test, model_name='Random Forest', params=None):
         """
-        Train multiple classification models for EMI eligibility prediction
+        Train a classification model with MLflow tracking
         
         Args:
-            X_train, X_test, y_train, y_test: Training and test data
-            preprocessor: Fitted preprocessor
-            model_types: List of model types to train
-            use_mlflow: Whether to log to MLflow
+            X_train: Training features
+            y_train: Training labels
+            X_test: Test features
+            y_test: Test labels
+            model_name: Name of the model to train
+            params: Hyperparameters for the model
             
         Returns:
-            Dictionary with training results and models
+            Trained model and evaluation metrics
         """
-        if model_types is None:
-            model_types = ['logistic_regression', 'random_forest', 'xgboost']
-        
-        results = {
-            'models': {},
-            'metrics': {},
-            'best_model': None,
-            'best_score': 0
-        }
-        
-        # Encode target for classification
-        le = LabelEncoder()
-        y_train_encoded = le.fit_transform(y_train)
-        y_test_encoded = le.transform(y_test)
-        
-        # Define model configurations
-        model_configs = {
-            'logistic_regression': {
-                'model': LogisticRegression(random_state=42),
-                'params': {'classifier__C': [0.1, 1, 10], 'classifier__max_iter': [1000]}
-            },
-            'random_forest': {
-                'model': RandomForestClassifier(random_state=42),
-                'params': {'classifier__n_estimators': [100, 200], 'classifier__max_depth': [10, 20]}
-            },
-            'xgboost': {
-                'model': XGBClassifier(random_state=42, eval_metric='logloss'),
-                'params': {'classifier__n_estimators': [100, 200], 'classifier__learning_rate': [0.1, 0.01]}
-            },
-            'gradient_boosting': {
-                'model': GradientBoostingClassifier(random_state=42),
-                'params': {'classifier__n_estimators': [100, 200], 'classifier__learning_rate': [0.1, 0.01]}
-            },
-            'svm': {
-                'model': SVC(random_state=42, probability=True),
-                'params': {'classifier__C': [0.1, 1, 10], 'classifier__kernel': ['linear', 'rbf']}
-            },
-            'decision_tree': {
-                'model': DecisionTreeClassifier(random_state=42),
-                'params': {'classifier__max_depth': [10, 20, None], 'classifier__min_samples_split': [2, 5]}
-            }
-        }
-        
-        if use_mlflow:
-            mlflow.set_experiment("EMI_Eligibility_Classification")
-        
-        for model_type in model_types:
-            if model_type not in model_configs:
-                self.logger.warning(f"Unknown model type: {model_type}")
-                continue
+        try:
+            # Set up MLflow run
+            run_name = f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            try:
-                self.logger.info(f"Training {model_type}...")
-                
-                if use_mlflow:
-                    with mlflow.start_run(run_name=model_type):
-                        model, metrics = self._train_single_classification_model(
-                            model_configs[model_type], preprocessor, 
-                            X_train, X_test, y_train_encoded, y_test_encoded,
-                            use_mlflow=True
-                        )
-                else:
-                    model, metrics = self._train_single_classification_model(
-                        model_configs[model_type], preprocessor,
-                        X_train, X_test, y_train_encoded, y_test_encoded,
-                        use_mlflow=False
-                    )
-                
-                # Store results
-                results['models'][model_type] = model
-                results['metrics'][model_type] = metrics
-                
-                # Update best model
-                if metrics['accuracy'] > results['best_score']:
-                    results['best_score'] = metrics['accuracy']
-                    results['best_model'] = model_type
-                
-                self.logger.info(f"{model_type} trained with accuracy: {metrics['accuracy']:.4f}")
-                
-            except Exception as e:
-                self.logger.error(f"Error training {model_type}: {str(e)}")
-                continue
-        
-        return results
-    
-    def _train_single_classification_model(self, model_config, preprocessor, 
-                                         X_train, X_test, y_train, y_test, 
-                                         use_mlflow: bool = True):
-        """Train a single classification model"""
-        # Create pipeline
-        pipeline = Pipeline([
-            ('preprocessor', preprocessor),
-            ('classifier', model_config['model'])
-        ])
-        
-        # Hyperparameter tuning
-        grid_search = GridSearchCV(
-            pipeline, 
-            model_config['params'], 
-            cv=5, 
-            scoring='accuracy',
-            n_jobs=-1,
-            verbose=0
-        )
-        
-        # Train model
-        grid_search.fit(X_train, y_train)
-        
-        # Best model
-        best_model = grid_search.best_estimator_
-        
-        # Predictions
-        y_pred = best_model.predict(X_test)
-        y_pred_proba = best_model.predict_proba(X_test)
-        
-        # Calculate metrics
-        metrics = {
-            'accuracy': accuracy_score(y_test, y_pred),
-            'precision': precision_score(y_test, y_pred, average='weighted'),
-            'recall': recall_score(y_test, y_pred, average='weighted'),
-            'f1_score': f1_score(y_test, y_pred, average='weighted'),
-            'roc_auc': roc_auc_score(y_test, y_pred_proba, multi_class='ovr'),
-            'best_params': grid_search.best_params_,
-            'cv_score': grid_search.best_score_
-        }
-        
-        # Log to MLflow
-        if use_mlflow:
-            mlflow.log_params(grid_search.best_params_)
-            mlflow.log_metrics({k: v for k, v in metrics.items() if k != 'best_params'})
-            mlflow.sklearn.log_model(best_model, "model")
+            # Initialize model
+            if model_name == 'Random Forest':
+                model = RandomForestClassifier(**params) if params else RandomForestClassifier()
+            elif model_name == 'Logistic Regression':
+                model = LogisticRegression(**params) if params else LogisticRegression()
+            elif model_name == 'XGBoost':
+                model = XGBClassifier(**params) if params else XGBClassifier()
+            elif model_name == 'Gradient Boosting':
+                model = GradientBoostingClassifier(**params) if params else GradientBoostingClassifier()
+            else:
+                raise ValueError(f"Unsupported model: {model_name}")
+            
+            # Train model
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            y_pred_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
+            
+            # Log to MLflow
+            metrics = self.mlflow_manager.log_classification_experiment(
+                model=model,
+                model_name=model_name,
+                X_test=X_test,
+                y_test=y_test,
+                params=params
+            )
+            
+            # Store model
+            self.classification_models[model_name] = model
             
             # Log feature importance if available
-            if hasattr(best_model.named_steps['classifier'], 'feature_importances_'):
-                feature_importance = dict(zip(
-                    [f"feature_{i}" for i in range(len(best_model.named_steps['classifier'].feature_importances_))],
-                    best_model.named_steps['classifier'].feature_importances_
-                ))
-                mlflow.log_dict(feature_importance, "feature_importance.json")
-        
-        return best_model, metrics
+            if hasattr(model, 'feature_importances_'):
+                importances = model.feature_importances_
+                indices = np.argsort(importances)[::-1]
+                plt.figure(figsize=(10, 6))
+                plt.title(f"Feature Importances - {model_name}")
+                plt.bar(range(X_train.shape[1]), importances[indices])
+                plt.xticks(range(X_train.shape[1]), 
+                          [X_train.columns[i] for i in indices], 
+                          rotation=90)
+                plt.tight_layout()
+                
+                # Log feature importance plot
+                importance_path = f"feature_importance_{model_name}.png"
+                plt.savefig(importance_path)
+                mlflow.log_artifact(importance_path)
+                plt.close()
+            
+            return model, metrics
+            
+        except Exception as e:
+            self.logger.error(f"Error training {model_name}: {str(e)}")
+            mlflow.end_run(status="FAILED")
+            raise
     
     def train_regression_models(self, X_train, X_test, y_train, y_test, 
                               preprocessor, model_types: List[str] = None,

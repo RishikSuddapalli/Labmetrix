@@ -8,50 +8,447 @@ import mlflow
 import mlflow.sklearn
 from streamlit_config import config
 from src.ui.navigation import render_sidebar_nav
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from src.model_training import ModelTrainer
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
 from xgboost import XGBClassifier, XGBRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, 
     roc_auc_score, confusion_matrix, classification_report,
-    mean_squared_error, mean_absolute_error, r2_score,
-    mean_absolute_percentage_error, explained_variance_score, max_error
+    mean_squared_error, mean_absolute_error, r2_score
 )
 import joblib
 import os
+import json
 from datetime import datetime
+from typing import Dict, List, Any, Tuple
+import matplotlib.pyplot as plt
+import seaborn as sns
+from io import BytesIO
 
-def validate_training_data(data):
-    """Validate data for model training and return (is_valid, message) tuple"""
+# Set page config
+st.set_page_config(
+    page_title="Model Training & Management",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Initialize session state
+if 'trained_models' not in st.session_state:
+    st.session_state.trained_models = {}
+if 'current_experiment' not in st.session_state:
+    st.session_state.current_experiment = None
+if 'mlflow_runs' not in st.session_state:
+    st.session_state.mlflow_runs = []
+
+# Initialize model trainer
+try:
+    model_trainer = ModelTrainer(experiment_name="EMI_Prediction_Models")
+except Exception as e:
+    st.error(f"Failed to initialize model trainer: {str(e)}")
+    st.stop()
+
+def validate_training_data(data: pd.DataFrame) -> Tuple[bool, str]:
+    """
+    Validate data for model training
+    
+    Args:
+        data: Input DataFrame to validate
+        
+    Returns:
+        Tuple of (is_valid, message)
+    """
     if data is None or not isinstance(data, pd.DataFrame):
-        return False, "No valid data found. Please load data first."
+        return False, "❌ No valid data found. Please load data first."
     
     if data.empty:
-        return False, "The dataset is empty. Please check your data source."
+        return False, "❌ The dataset is empty. Please check your data source."
     
-    # Enforce exact schema presence
-    required_targets = ['emi_eligibility', 'max_monthly_emi']
-    required_features = [
-        'age','gender','marital_status','education','monthly_salary','employment_type',
-        'years_of_employment','company_type','house_type','monthly_rent','family_size',
-        'dependents','school_fees','college_fees','travel_expenses','groceries_utilities',
-        'other_monthly_expenses','existing_loans','current_emi_amount','credit_score',
-        'bank_balance','emergency_fund','emi_scenario','requested_amount','requested_tenure'
+    # Required columns
+    required_columns = [
+        'age', 'monthly_salary', 'credit_score', 'requested_amount',
+        'requested_tenure', 'emi_eligibility', 'max_monthly_emi'
     ]
-    missing = [col for col in required_targets + required_features if col not in data.columns]
-    if missing:
-        return False, f"Missing required columns for training: {', '.join(missing)}"
     
-    return True, "Data is ready for model training"
+    missing = [col for col in required_columns if col not in data.columns]
+    if missing:
+        return False, f"❌ Missing required columns: {', '.join(missing)}"
+    
+    # Check for missing values
+    missing_values = data[required_columns].isnull().sum()
+    if missing_values.sum() > 0:
+        missing_cols = missing_values[missing_values > 0].index.tolist()
+        return False, f"❌ Missing values found in columns: {', '.join(missing_cols)}"
+    
+    return True, "✅ Data is ready for model training"
+
+def get_available_models() -> Dict[str, Dict[str, Any]]:
+    """Return available models with their default parameters"""
+    return {
+        "classification": {
+            "Logistic Regression": {"C": 1.0, "max_iter": 1000},
+            "Random Forest": {"n_estimators": 100, "max_depth": 10, "random_state": 42},
+            "XGBoost": {"n_estimators": 100, "learning_rate": 0.1, "random_state": 42},
+            "Gradient Boosting": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42}
+        },
+        "regression": {
+            "Linear Regression": {},
+            "Random Forest": {"n_estimators": 100, "max_depth": 10, "random_state": 42},
+            "XGBoost": {"n_estimators": 100, "learning_rate": 0.1, "random_state": 42},
+            "Gradient Boosting": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42}
+        }
+    }
+
+def plot_metrics(metrics: Dict[str, float], title: str = "Model Metrics") -> None:
+    """Plot model metrics using Plotly"""
+    if not metrics:
+        return
+        
+    fig = px.bar(
+        x=list(metrics.keys()),
+        y=list(metrics.values()),
+        title=title,
+        labels={'x': 'Metric', 'y': 'Score'},
+        color=list(metrics.keys())
+    )
+    fig.update_layout(showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
+    """Plot confusion matrix"""
+    cm = confusion_matrix(y_true, y_pred)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    ax.set_title(title)
+    st.pyplot(fig)
+
+@st.cache_data
+def get_mlflow_runs(experiment_name: str = None) -> List[Dict[str, Any]]:
+    """Get MLflow runs for the specified experiment"""
+    try:
+        client = mlflow.tracking.MlflowClient()
+        if experiment_name:
+            experiment = client.get_experiment_by_name(experiment_name)
+            if not experiment:
+                return []
+            runs = client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                order_by=["attributes.start_time DESC"]
+            )
+        else:
+            runs = client.search_runs(experiment_ids=[])
+            
+        return [{
+            'run_id': run.info.run_id,
+            'experiment_id': run.info.experiment_id,
+            'status': run.info.status,
+            'start_time': run.info.start_time,
+            'end_time': run.info.end_time,
+            'metrics': run.data.metrics,
+            'params': run.data.params,
+            'tags': run.data.tags
+        } for run in runs]
+    except Exception as e:
+        st.error(f"Error fetching MLflow runs: {str(e)}")
+        return []
+
+def show_model_training(data: pd.DataFrame) -> None:
+    """Show model training interface"""
+    st.header("🎯 Train New Model")
+    
+    if data is None or data.empty:
+        st.warning("Please load data first in the Data Analysis page.")
+        return
+    
+    # Data validation
+    is_valid, message = validate_training_data(data)
+    if not is_valid:
+        st.error(message)
+        return
+    
+    # Model type selection
+    model_type = st.radio("Select Model Type", ["Classification", "Regression"])
+    
+    # Target selection
+    target_col = st.selectbox(
+        "Select Target Variable",
+        ["emi_eligibility"] if model_type == "Classification" else ["max_monthly_emi"]
+    )
+    
+    # Feature selection
+    feature_cols = st.multiselect(
+        "Select Features",
+        [col for col in data.columns if col != target_col],
+        default=[col for col in data.columns if col != target_col]
+    )
+    
+    # Model selection
+    available_models = get_available_models()["classification" if model_type == "Classification" else "regression"]
+    selected_model = st.selectbox("Select Model", list(available_models.keys()))
+    
+    # Hyperparameter tuning
+    st.subheader("Hyperparameters")
+    params = {}
+    default_params = available_models[selected_model]
+    
+    for param, default_val in default_params.items():
+        if isinstance(default_val, bool):
+            params[param] = st.checkbox(param, value=default_val, key=f"param_{param}")
+        elif isinstance(default_val, int):
+            params[param] = st.number_input(
+                param, 
+                value=default_val, 
+                min_value=1, 
+                step=1,
+                key=f"param_{param}"
+            )
+        elif isinstance(default_val, float):
+            params[param] = st.number_input(
+                param, 
+                value=default_val, 
+                min_value=0.0, 
+                step=0.01,
+                key=f"param_{param}"
+            )
+    
+    # Train/test split
+    st.subheader("Train/Test Split")
+    test_size = st.slider("Test Size", 0.1, 0.5, 0.2, 0.05)
+    random_state = st.number_input("Random State", 42)
+    
+    # MLflow options
+    st.subheader("Experiment Tracking")
+    use_mlflow = st.checkbox("Enable MLflow Tracking", True)
+    experiment_name = st.text_input("Experiment Name", f"EMI_{model_type}_{datetime.now().strftime('%Y%m%d')}")
+    
+    # Train button
+    if st.button("🚀 Train Model", type="primary"):
+        with st.spinner("Training model..."):
+            try:
+                # Prepare data
+                X = data[feature_cols]
+                y = data[target_col]
+                
+                # Convert categorical features
+                categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+                if categorical_cols:
+                    preprocessor = ColumnTransformer(
+                        transformers=[
+                            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols)
+                        ],
+                        remainder='passthrough'
+                    )
+                    X = preprocessor.fit_transform(X)
+                
+                # Split data
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=random_state,
+                    stratify=y if model_type == "Classification" else None
+                )
+                
+                # Train model
+                if model_type == "Classification":
+                    model, metrics = model_trainer.train_classification_model(
+                        X_train, y_train, X_test, y_test,
+                        model_name=selected_model,
+                        params=params
+                    )
+                else:
+                    model, metrics = model_trainer.train_regression_model(
+                        X_train, y_train, X_test, y_test,
+                        model_name=selected_model,
+                        params=params
+                    )
+                
+                # Store model in session state
+                model_key = f"{model_type}_{selected_model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                st.session_state.trained_models[model_key] = {
+                    'model': model,
+                    'type': model_type.lower(),
+                    'metrics': metrics,
+                    'features': feature_cols,
+                    'target': target_col,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                st.success("✅ Model trained successfully!")
+                
+                # Show metrics
+                st.subheader("Model Performance")
+                plot_metrics(metrics)
+                
+                # For classification, show confusion matrix
+                if model_type == "Classification":
+                    y_pred = model.predict(X_test)
+                    plot_confusion_matrix(y_test, y_pred)
+                
+                # For regression, show actual vs predicted
+                else:
+                    y_pred = model.predict(X_test)
+                    fig = px.scatter(
+                        x=y_test, y=y_pred,
+                        labels={'x': 'Actual', 'y': 'Predicted'},
+                        title='Actual vs Predicted Values'
+                    )
+                    fig.add_shape(
+                        type="line",
+                        x0=y_test.min(), y0=y_test.min(),
+                        x1=y_test.max(), y1=y_test.max(),
+                        line=dict(color="red", dash="dash")
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"❌ Error training model: {str(e)}")
+                st.exception(e)
+
+def show_model_registry():
+    """Show MLflow model registry"""
+    st.header("📚 Model Registry")
+    
+    try:
+        # Get all experiments
+        experiments = mlflow.search_experiments()
+        experiment_names = [exp.name for exp in experiments]
+        
+        if not experiment_names:
+            st.info("No experiments found in MLflow")
+            return
+        
+        # Select experiment
+        selected_exp = st.selectbox("Select Experiment", experiment_names)
+        
+        # Get runs for selected experiment
+        runs = get_mlflow_runs(selected_exp)
+        
+        if not runs:
+            st.info(f"No runs found for experiment: {selected_exp}")
+            return
+        
+        # Show runs in a table
+        runs_df = pd.DataFrame([{
+            'Run ID': run['run_id'],
+            'Start Time': datetime.fromtimestamp(run['start_time']/1000).strftime('%Y-%m-%d %H:%M:%S'),
+            'Status': run['status'],
+            'Model': run['params'].get('model_name', 'N/A'),
+            'Metrics': ', '.join([f"{k}: {v:.4f}" for k, v in run['metrics'].items()])
+        } for run in runs])
+        
+        st.dataframe(runs_df, use_container_width=True)
+        
+        # Show run details
+        if st.checkbox("Show Run Details"):
+            selected_run_id = st.selectbox("Select Run", runs_df['Run ID'].tolist())
+            selected_run = next(run for run in runs if run['run_id'] == selected_run_id)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Parameters")
+                st.json(selected_run['params'])
+                
+            with col2:
+                st.subheader("Metrics")
+                st.json(selected_run['metrics'])
+                
+            # Show artifacts if available
+            if 'artifacts' in selected_run:
+                st.subheader("Artifacts")
+                for artifact in selected_run['artifacts']:
+                    st.write(f"- {artifact}")
+    
+    except Exception as e:
+        st.error(f"Error accessing MLflow: {str(e)}")
+
+def show_deployment():
+    """Show model deployment interface"""
+    st.header("🚀 Deploy Model")
+    
+    if not st.session_state.trained_models:
+        st.warning("No models available for deployment. Please train a model first.")
+        return
+    
+    # Select model to deploy
+    model_options = list(st.session_state.trained_models.keys())
+    selected_model = st.selectbox("Select Model to Deploy", model_options)
+    
+    model_info = st.session_state.trained_models[selected_model]
+    
+    # Show model info
+    st.subheader("Model Information")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Model Type", model_info['type'].capitalize())
+        st.metric("Target Variable", model_info['target'])
+    
+    with col2:
+        st.metric("Training Date", model_info['timestamp'].split('T')[0])
+        st.metric("Number of Features", len(model_info['features']))
+    
+    # Deployment options
+    st.subheader("Deployment Options")
+    deployment_target = st.radio(
+        "Deploy to",
+        ["Local File System", "MLflow Model Registry", "REST API"]
+    )
+    
+    if deployment_target == "Local File System":
+        model_name = st.text_input("Model Name", f"{model_info['type']}_model")
+        if st.button("💾 Save Model"):
+            try:
+                os.makedirs("models", exist_ok=True)
+                model_path = f"models/{model_name}.pkl"
+                joblib.dump(model_info['model'], model_path)
+                st.success(f"✅ Model saved to {model_path}")
+            except Exception as e:
+                st.error(f"❌ Error saving model: {str(e)}")
+    
+    elif deployment_target == "MLflow Model Registry":
+        model_name = st.text_input("Model Name", f"emi_{model_info['type']}_model")
+        if st.button("📤 Register Model"):
+            try:
+                with mlflow.start_run():
+                    mlflow.sklearn.log_model(
+                        model_info['model'],
+                        "model",
+                        registered_model_name=model_name
+                    )
+                    mlflow.log_metrics(model_info['metrics'])
+                    mlflow.set_tag("model_type", model_info['type'])
+                st.success("✅ Model registered successfully!")
+            except Exception as e:
+                st.error(f"❌ Error registering model: {str(e)}")
+    
+    elif deployment_target == "REST API":
+        st.warning("REST API deployment is not yet implemented.")
 
 def main():
-    st.set_page_config(
-        page_title="Model Training - EMIPredict AI",
-        page_icon="🤖",
-        layout="wide"
+    # Sidebar navigation
+    st.sidebar.title("Model Management")
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Train Model", "Model Registry", "Deploy Model"],
+        index=0
     )
+    
+    # Load data from session state
+    data = st.session_state.get('processed_data')
+    
+    # Show selected page
+    if page == "Train Model":
+        show_model_training(data)
+    elif page == "Model Registry":
+        show_model_registry()
+    elif page == "Deploy Model":
+        show_deployment()
     
     st.title("🤖 Machine Learning Model Training")
     st.markdown("Train and evaluate classification and regression models for financial risk assessment")

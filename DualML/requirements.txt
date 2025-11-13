@@ -1,14 +1,35 @@
-streamlit
-pandas
-numpy
-scikit-learn
-xgboost
-mlflow
-plotly
-matplotlib
-seaborn
-joblib
-python-dotenv
-ipykernel
-tqdm
-statsmodels
+# Core dependencies
+streamlit>=1.28.0
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Machine Learning
+scikit-learn>=1.0.0
+xgboost>=1.5.0
+
+# MLflow and Experiment Tracking
+mlflow>=2.0.0
+pymysql>=1.0.0  # For MySQL backend
+psycopg2-binary>=2.9.0  # For PostgreSQL backend
+boto3>=1.24.0  # For S3 artifact storage
+
+# Visualization
+plotly>=5.5.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Utilities
+joblib>=1.1.0
+python-dotenv>=0.20.0
+ipykernel>=6.0.0
+tqdm>=4.60.0
+statsmodels>=0.13.0
+
+# Additional ML libraries
+lightgbm>=3.3.0
+catboost>=1.0.0
+
+# API and Deployment
+fastapi>=0.85.0
+uvicorn>=0.19.0
+python-multipart>=0.0.5

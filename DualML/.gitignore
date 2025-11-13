@@ -2,20 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -23,53 +15,61 @@ wheels/
 # Virtual Environment
 venv/
 env/
+.venv/
 ENV/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Environment variables
+.env
+*.env
+!.env.example
 
-# IDE
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+
+# MLflow (for experiment tracking)
+mlruns/
+mlflow.db
+
+# Data files
+data/*
+!data/.gitkeep
+!data/emi_prediction_dataset.csv
+
+# Model files
+models/
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+
+# Logs and databases
+*.log
+logs/
+*.sqlite
+*.db
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editor files
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
-
-# Environment variables
-.env
-
-# Logs
-logs/
-*.log
-
-# MLflow
-mlruns/
-mlflow.db
+*.swn
 
 # Local development
 .local/
+.cache/
 
-# Data files
-# Allow specific dataset file
-!data/emi_prediction_dataset.csv
-# But ignore all other CSV files
-*.csv
-*.h5
-*.pkl
-*.pth
-*.pt
-*.bin
-*.npy
-*.npz
-
-
-# Project specific
-models/
-# Don't ignore the data directory, just specific files within it
-# data/
-
-# Streamlit
-.streamlit/
-
-# MLflow
-mlruns/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
