@@ -31,22 +31,18 @@ def validate_training_data(data):
     if data.empty:
         return False, "The dataset is empty. Please check your data source."
     
-    # Check for required columns allowing aliases (original vs current dataset)
-    required_aliases = {
-        'age': ['age'],
-        'monthly_salary': ['monthly_salary'],
-        'bank_balance': ['bank_balance'],
-        'loan_amount': ['loan_amount', 'requested_amount'],
-        'cibil_score': ['cibil_score', 'credit_score'],
-        'emi_eligibility': ['emi_eligibility'],
-        'max_emi': ['max_affordable_emi', 'max_monthly_emi']
-    }
-    missing_groups = [
-        '/'.join(options) for options in required_aliases.values()
-        if not any(opt in data.columns for opt in options)
+    # Enforce exact schema presence
+    required_targets = ['emi_eligibility', 'max_monthly_emi']
+    required_features = [
+        'age','gender','marital_status','education','monthly_salary','employment_type',
+        'years_of_employment','company_type','house_type','monthly_rent','family_size',
+        'dependents','school_fees','college_fees','travel_expenses','groceries_utilities',
+        'other_monthly_expenses','existing_loans','current_emi_amount','credit_score',
+        'bank_balance','emergency_fund','emi_scenario','requested_amount','requested_tenure'
     ]
-    if missing_groups:
-        return False, f"Missing required columns for training: {', '.join(missing_groups)}"
+    missing = [col for col in required_targets + required_features if col not in data.columns]
+    if missing:
+        return False, f"Missing required columns for training: {', '.join(missing)}"
     
     return True, "Data is ready for model training"
 
@@ -131,17 +127,14 @@ def show_data_preparation(data):
     
     st.subheader("Feature Selection")
     
-    # Available features
-    numerical_features = data.select_dtypes(include=[np.number]).columns.tolist()
-    categorical_features = data.select_dtypes(include=['object']).columns.tolist()
+    # Available features strictly from config and present in data
+    from streamlit_config import config
+    configured_num = [c for c in config.NUMERICAL_FEATURES if c in data.columns]
+    configured_cat = [c for c in config.CATEGORICAL_FEATURES if c in data.columns]
     
-    # Remove target variables from feature lists
-    if 'emi_eligibility' in categorical_features:
-        categorical_features.remove('emi_eligibility')
-    # Remove whichever regression target exists
-    for target_col in ['max_affordable_emi', 'max_monthly_emi']:
-        if target_col in numerical_features:
-            numerical_features.remove(target_col)
+    # Remove targets from selection lists
+    numerical_features = [c for c in configured_num if c != 'max_monthly_emi']
+    categorical_features = [c for c in configured_cat if c != 'emi_eligibility']
     
     col1, col2 = st.columns(2)
     
@@ -187,8 +180,8 @@ def show_data_preparation(data):
                 # Prepare features and targets
                 X = data[selected_numerical + selected_categorical].copy()
                 y_classification = data['emi_eligibility']
-                # Pick available regression target
-                y_regression = data['max_affordable_emi'] if 'max_affordable_emi' in data.columns else data['max_monthly_emi']
+                # Standardize regression target
+                y_regression = data['max_monthly_emi']
                 
                 # Store in session state
                 st.session_state.X = X
@@ -326,6 +319,9 @@ def show_classification_training(data):
                 
                 # Results table
                 results_df = pd.DataFrame(results)
+                if results_df.empty:
+                    st.error("No classification models produced results. Please adjust settings and retry.")
+                    return
                 st.dataframe(results_df, use_container_width=True)
                 
                 # Visualizations
@@ -441,6 +437,9 @@ def show_regression_training(data):
                 
                 # Results table
                 results_df = pd.DataFrame(results)
+                if results_df.empty:
+                    st.error("No regression models produced results. Please adjust settings and retry.")
+                    return
                 st.dataframe(results_df, width='stretch')
                 
                 # Visualizations
@@ -747,7 +746,14 @@ def train_regression_models(X, y, models, hyperparams, test_size, cv_folds, use_
                     y_pred = pipeline.predict(X_test)
                     
                     # Calculate metrics
-                    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error
+                    from sklearn.metrics import (
+                        mean_squared_error,
+                        mean_absolute_error,
+                        r2_score,
+                        mean_absolute_percentage_error,
+                        explained_variance_score,
+                        max_error,
+                    )
                     
                     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
                     mae = mean_absolute_error(y_test, y_pred)

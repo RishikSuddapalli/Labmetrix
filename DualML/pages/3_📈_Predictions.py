@@ -354,7 +354,7 @@ def prepare_input_data(age, gender, marital_status, education, monthly_salary, e
         'travel_expenses': float(travel_expenses),
         'groceries_utilities': float(groceries_utilities),
         'other_monthly_expenses': float(other_monthly_expenses),
-        'existing_loans': 1 if str(existing_loans).lower() in ['yes', 'true', '1'] else 0,
+        'existing_loans': str(existing_loans) if existing_loans is not None else 'No',
         'current_emi_amount': float(current_emi_amount),
         'credit_score': float(credit_score),
         'bank_balance': float(bank_balance),
@@ -405,13 +405,7 @@ def get_predictions(input_data):
                     clean_data[k] = float(val) if val is not None else 0.0
                 except (ValueError, TypeError):
                     clean_data[k] = 0.0
-            # Handle existing_loans specifically
-            elif k == 'existing_loans':
-                if isinstance(val, str):
-                    clean_data[k] = 1 if val.lower() in ['yes', 'true', '1'] else 0
-                else:
-                    clean_data[k] = 1 if val else 0
-            # Handle other string fields
+            # Handle other string fields (including existing_loans)
             else:
                 clean_data[k] = str(val) if val is not None else 'Unknown'
         

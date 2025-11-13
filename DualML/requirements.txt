@@ -11,3 +11,4 @@ joblib
 python-dotenv
 ipykernel
 tqdm
+statsmodels

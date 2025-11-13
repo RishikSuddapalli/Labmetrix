@@ -35,7 +35,7 @@ class Config:
     # ===== FEATURE CONFIGURATION =====
     # Core numerical features (updated to match dataset)
     NUMERICAL_FEATURES = [
-        'age', 'monthly_salary', 'years_of_employment', 'family_size',
+        'age', 'monthly_salary', 'monthly_rent', 'years_of_employment', 'family_size',
         'dependents', 'school_fees', 'college_fees', 'travel_expenses',
         'groceries_utilities', 'other_monthly_expenses', 'current_emi_amount',
         'credit_score', 'bank_balance', 'emergency_fund', 'requested_amount',

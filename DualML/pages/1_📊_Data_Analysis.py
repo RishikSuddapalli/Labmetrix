@@ -468,6 +468,13 @@ def show_correlation_analysis(data):
         if len(duplicated_cols) > 0:
             data = data.loc[:, ~data.columns.duplicated()]
             st.warning(f"Duplicate columns found and removed before plotting: {', '.join(duplicated_cols)}.")
+        # Use LOWESS trendline only if statsmodels is available
+        trendline_opt = 'lowess'
+        try:
+            import statsmodels.api as sm  # noqa: F401
+        except Exception:
+            trendline_opt = None
+            st.info("Install statsmodels to enable LOWESS trendline: pip install statsmodels")
         fig = px.scatter(
             data,
             x=x_feature,
@@ -479,7 +486,7 @@ def show_correlation_analysis(data):
                 'High_Risk': '#ffc107',
                 'Not_Eligible': '#dc3545'
             },
-            trendline='lowess'
+            trendline=trendline_opt
         )
         st.plotly_chart(fig, use_container_width=True)
         
