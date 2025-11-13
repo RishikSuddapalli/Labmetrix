@@ -11,6 +11,8 @@ import joblib
 import sqlite3
 from datetime import datetime
 import os
+import requests
+from tqdm import tqdm
 from streamlit_config import config
 from src.ui.navigation import render_sidebar_nav
 # Page configuration
@@ -90,70 +92,164 @@ class EMIPredictAI:
         self.models = {}
         self.mlflow_uri = "mlruns"
         
+    def download_file_from_google_drive(self, file_id, destination):
+        """Download a file from Google Drive given its ID"""
+        import requests
+        from tqdm import tqdm
+        
+        URL = "https://drive.google.com/uc?export=download"
+        session = requests.Session()
+        
+        # Get the download confirmation token
+        response = session.get(URL, params={'id': file_id}, stream=True)
+        token = None
+        
+        for key, value in response.cookies.items():
+            if key.startswith('download_warning'):
+                token = value
+                break
+        
+        # Download the file with progress bar
+        if token:
+            params = {'id': file_id, 'confirm': token}
+            response = session.get(URL, params=params, stream=True)
+        
+        # Save the file
+        CHUNK_SIZE = 32768
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with open(destination, 'wb') as f, tqdm(
+            desc=os.path.basename(destination),
+            total=total_size,
+            unit='B',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as bar:
+            for chunk in response.iter_content(CHUNK_SIZE):
+                if chunk:  # filter out keep-alive new chunks
+                    f.write(chunk)
+                    bar.update(len(chunk))
+        
+        return destination
+
     def load_sample_data(self):
-        """Load the emi_prediction_dataset.csv file"""
+        """Load the emi_prediction_dataset.csv file, download from Google Drive if not found"""
         import os
         from pathlib import Path
         
-        # Define possible locations for the dataset
-        possible_paths = [
-            os.path.join('data', 'emi_prediction_dataset.csv'),  # Local development
-            os.path.join(os.getcwd(), 'data', 'emi_prediction_dataset.csv'),  # Absolute path
-            'emi_prediction_dataset.csv',  # Current directory
-            os.path.join(os.path.dirname(__file__), 'data', 'emi_prediction_dataset.csv')  # Module-relative path
-        ]
+        # Define the dataset file path
+        data_dir = 'data'
+        os.makedirs(data_dir, exist_ok=True)
+        dataset_path = os.path.join(data_dir, 'emi_prediction_dataset.csv')
         
-        df = None
-        found_path = None
+        # Google Drive file ID for the dataset
+        GOOGLE_DRIVE_ID = '1FdSmOomMG7bal9ZbZreG-GwFmXPh3I6E'
         
-        # Try each possible path
-        for dataset_path in possible_paths:
+        # Try to load the local file first
+        if os.path.exists(dataset_path):
             try:
-                self.logger.info(f"Attempting to load dataset from: {dataset_path}")
-                if os.path.exists(dataset_path):
-                    df = pd.read_csv(dataset_path)
-                    found_path = dataset_path
-                    self.logger.info(f"Successfully loaded dataset from {dataset_path}")
-                    break
+                df = pd.read_csv(dataset_path)
+                self.logger.info(f"Successfully loaded dataset from {dataset_path}")
+                
+                # Store the data in session state
+                st.session_state.current_data = df
+                st.session_state.data_loaded = True
+                st.session_state.data_path = dataset_path
+                
+                return df
             except Exception as e:
-                self.logger.warning(f"Failed to load from {dataset_path}: {str(e)}")
-                continue
+                self.logger.warning(f"Error loading local dataset: {str(e)}")
         
-        if df is None:
-            error_msg = (
-                "Could not find or load 'emi_prediction_dataset.csv' in any of these locations:\n"
-                f"{chr(10).join(possible_paths)}\n\n"
-                "Please ensure the file exists in one of these locations."
-            )
+        # If local file doesn't exist or fails to load, download from Google Drive
+        try:
+            self.logger.info("Downloading dataset from Google Drive...")
+            self.download_file_from_google_drive(GOOGLE_DRIVE_ID, dataset_path)
+            
+            # Load the downloaded file
+            df = pd.read_csv(dataset_path)
+            self.logger.info(f"Successfully downloaded and loaded dataset to {dataset_path}")
+            
+            # Store the data in session state
+            st.session_state.current_data = df
+            st.session_state.data_loaded = True
+            st.session_state.data_path = dataset_path
+            
+            return df
+            
+        except Exception as e:
+            error_msg = f"Failed to download or load dataset: {str(e)}"
             self.logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-        
-        # Store the data in session state
-        st.session_state.current_data = df
-        st.session_state.data_loaded = True
-        st.session_state.data_path = found_path
-        
-        return df
+            raise RuntimeError(error_msg)
 
     def calculate_financial_ratios(self, df):
-        """Calculate key financial ratios"""
-        df['debt_to_income'] = (df['current_emi_amount'] / df['monthly_salary']).fillna(0)
-        df['expense_to_income'] = (
-            (df['monthly_rent'] + df['school_fees'] + df['college_fees'] + 
-             df['travel_expenses'] + df['groceries_utilities'] + 
-             df['other_monthly_expenses'] + df['current_emi_amount']) / 
-            df['monthly_salary']
-        ).fillna(0)
-        df['affordability_ratio'] = (
-            (df['monthly_salary'] - 
-             (df['monthly_rent'] + df['school_fees'] + df['college_fees'] + 
-              df['travel_expenses'] + df['groceries_utilities'] + 
-              df['other_monthly_expenses'])) / 
-            df['monthly_salary']
-        ).fillna(0)
-        
-        # Risk scoring
-        df['employment_stability'] = df['years_of_employment'] / 30  # Normalized
+        """Calculate key financial ratios with robust error handling"""
+        try:
+            # Ensure required columns exist
+            required_columns = [
+                'current_emi_amount', 'monthly_salary', 'monthly_rent',
+                'school_fees', 'college_fees', 'travel_expenses',
+                'groceries_utilities', 'other_monthly_expenses'
+            ]
+            
+            # Check for missing columns
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+            
+            # Convert columns to numeric, coercing errors to NaN
+            numeric_cols = {}
+            for col in required_columns:
+                numeric_cols[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Calculate debt to income ratio
+            df['debt_to_income'] = (
+                numeric_cols['current_emi_amount'] / 
+                numeric_cols['monthly_salary'].replace(0, np.nan)
+            ).fillna(0).clip(0, 10)  # Clip to reasonable range
+            
+            # Calculate expense to income ratio
+            total_expenses = (
+                numeric_cols['monthly_rent'] + 
+                numeric_cols['school_fees'] + 
+                numeric_cols['college_fees'] + 
+                numeric_cols['travel_expenses'] + 
+                numeric_cols['groceries_utilities'] + 
+                numeric_cols['other_monthly_expenses'] + 
+                numeric_cols['current_emi_amount']
+            )
+            
+            df['expense_to_income'] = (
+                total_expenses / 
+                numeric_cols['monthly_salary'].replace(0, np.nan)
+            ).fillna(0).clip(0, 5)  # Clip to reasonable range
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error in calculate_financial_ratios: {str(e)}")
+            # Create default columns with zeros if calculation fails
+            if 'debt_to_income' not in df.columns:
+                df['debt_to_income'] = 0
+            if 'expense_to_income' not in df.columns:
+                df['expense_to_income'] = 0
+            # Add additional financial metrics
+            try:
+                df['affordability_ratio'] = (
+                    (numeric_cols['monthly_salary'] - total_expenses) / 
+                    numeric_cols['monthly_salary'].replace(0, np.nan)
+                ).fillna(0).clip(-1, 1)  # Clip to -1 to 1 range
+                
+                # Risk scoring
+                if 'years_of_employment' in df.columns:
+                    df['employment_stability'] = (
+                        pd.to_numeric(df['years_of_employment'], errors='coerce') / 30
+                    ).fillna(0).clip(0, 1)  # Normalized 0-1
+                
+                return df
+                
+            except Exception as inner_e:
+                self.logger.warning(f"Error in additional financial calculations: {str(inner_e)}")
+                return df
         df['financial_stability'] = (df['bank_balance'] + df['emergency_fund']) / df['monthly_salary']
         df['risk_score'] = (
             0.3 * (1 - df['employment_stability']) +

@@ -10,3 +10,4 @@ seaborn
 joblib
 python-dotenv
 ipykernel
+tqdm
